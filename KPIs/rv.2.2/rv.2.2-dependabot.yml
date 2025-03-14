@@ -1,0 +1,62 @@
+# This workflow is triggered by Dependabot pull requests and adds labels based on the type of dependency update. 
+# It belongs to the Dependabot auto-label and fetch metadata workflow group and covers point rv.2.2 in SSDF. 
+
+name: Dependabot auto-label and fetch metadata
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  pull-requests: write
+  issues: write
+  repository-projects: write
+
+jobs:
+  dependabot:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Dependabot metadata
+        id: dependabot-metadata
+        uses: dependabot/fetch-metadata@v2
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Add a label for all production dependencies
+        if: ${{ steps.dependabot-metadata.outputs.dependency-type == 'direct:production' }}
+        run: gh pr edit "$PR_URL" --add-label "production"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add a label for all development dependencies
+        if: ${{ steps.dependabot-metadata.outputs.dependency-type == 'direct:development' }}
+        run: gh pr edit "$PR_URL" --add-label "development"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add a label for all security updates
+        if: ${{ steps.dependabot-metadata.outputs.update-type == 'security' }}
+        run: gh pr edit "$PR_URL" --add-label "security"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add a label for all version updates
+        if: ${{ steps.dependabot-metadata.outputs.update-type == 'version-update' }}
+        run: gh pr edit "$PR_URL" --add-label "version-update"
+        env:
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Dependabot file creator to automatically create update files
+        if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+        run: |
+          echo "Automatically updating and delivering solutions..."
+          dependabot file-creator --github-token ${{ secrets.GITHUB_TOKEN }} --updates
