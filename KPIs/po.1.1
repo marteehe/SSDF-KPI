@@ -1,0 +1,89 @@
+name: PO.1.1
+
+on:
+  schedule:
+    - cron: '0 0 1 * *'  # Running on the fist day of each month
+  push:
+    branches:
+      - main
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    steps:
+        # Step 1: Check out the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+        # Step 2: Install the latest version of trivy
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@v0.2.2
+        with:
+            version: 'v0.57.1'
+
+        # Step 3: Scan the entire project for vulnerabilitiues using trivy
+      - name: Scan repository for vulnerabilities
+        id: trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'docker.io/library/alpine:3.10'
+          format: json
+          output: trivy-report.json
+          exit-code: 0
+          severity: HIGH,CRITICAL
+          vuln-type: os,library
+          ignore-unfixed: false
+        continue-on-error: true
+
+        # Step 4: Ensure the Trivy report exists
+      - name: Ensure Trivy report exists
+        run: |
+         if [ ! -f trivy-results.json ]; then
+         touch trivy-results.json
+         fi
+
+        # Step 5: Install and run Checkov
+      - name: Run Checkov action
+        id: checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          framework: terraform
+
+        # Step 6: Ensure checkov results file exists
+      - name: Ensure Checkov results file exists
+        run: |
+          if [ ! -f results.sarif ]; then
+          touch results.sarif
+          fi
+
+        # Step 7: Upload results to GitHub Advanced Security
+      - name: Upload SARIF file
+        if: success() || failure()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: checkov
+
+        # Step 8: Save the results as an artifact
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-results
+          path: |
+            trivy-results.json
+            results.sarif
+
+        # Step 9: Comment Pull Requests with the results
+      - name: Comment on PR
+        uses: actions/github-script@v4
+        with:
+          script: |
+            const fs = require('fs');
+            const results = fs.readFileSync('results/security-results.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `PO.1.1:\n\n${results}`
+            });
