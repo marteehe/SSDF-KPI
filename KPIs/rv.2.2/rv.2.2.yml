@@ -1,150 +1,81 @@
- name: rv.2.2
+name: RV.2.2
 
-
-#TODO er det riktig å bygge opp denne med push og pull_request? mtp. at jeg nå kjører scheduled job??? 
 on:
   push:
+    branches:
+      - main
   pull_request:
     branches:
       - main
   schedule:
-    - cron: '0 0 * * 1' # Run every Monday at 00:00
-  workflow_dispatch: # Allow manual triggering of the workflow
+    - cron: '0 0 * * 1' # Kjør hver mandag kl 00:00
+  workflow_dispatch: # Tillater manuell kjøring
 
 jobs:
-  security-risk-management:
-    name: Security Risk Management
+  security-scan:
+    name: Security Scan
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Get the entire Git history
 
-
-      - name: Set up Trivy
+      - name: Install Trivy
         uses: aquasecurity/setup-trivy@v0.2.2
         with:
           version: 'v0.57.1'
 
-      - name: Scan repository for vulnerabilities
+      - name: Run Trivy scan
         id: trivy
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'docker.io/library/alpine:3.10'
           format: json
           output: trivy-report.json
-          exit-code: 0
           severity: HIGH,CRITICAL
           vuln-type: os,library
           ignore-unfixed: false
         continue-on-error: true
 
-      # Scan Terraform modules
-      - name: Scan Terraform modules with Trivy
+      - name: Run Checkov scan
         run: |
-          mkdir -p trivy-reports
-          for module in azurefirewall azurefirewallpolicy azurefirewallrulecolgrp bastion publicip \
-                       recoveryservicesvault resourcegroups routetables vm-linux vm-windows vnet-peering vnet; do
-            echo "Scanning $module..."
-            trivy fs --format json --output trivy-reports/trivy-report-$module.json ./modules/$module || true
-          done
-
-      - name: Generate and output the report
-        run: |
-          echo "Trivy scan completed. Output:"
-          cat trivy-report.json
-
-      # Save Trivy reports as artifacts
-      - name: Save Trivy reports
-        uses: actions/upload-artifact@v4
-        with:
-          name: trivy-reports-${{ github.run_id }}
-          path: trivy-reports/*.json
-              
-              
-      # Step 6: Scan Terraform code with Checkov for Azure-specific vulnerabilities
-      - name: Scan Terraform with Checkov
+          pip install checkov
+          checkov -d . --framework terraform --output json > checkov-report.json
+          cat checkov-report.json || echo "Checkov report not found!"
         continue-on-error: true
-        run: |
-          pip install checkov  # Install Checkov
-          checkov -d . --framework terraform --output json > checkov-report.json  # Scan the entire repository
-          cat checkov-report.json || echo "Checkov report not found!"  # Output the Checkov report for debugging
 
-      # Step 7: Output Checkov summary
-      - name: Output Checkov summary
-        id: checkov-summary
-        run: |
-          echo "Parsing Checkov report..."
-          if [ -f checkov-report.json ]; then
-            passed=$(jq '.summary.passed' checkov-report.json)
-            failed=$(jq '.summary.failed' checkov-report.json)
-            skipped=$(jq '.summary.skipped' checkov-report.json)
-            parsing_errors=$(jq '.summary.parsing_errors' checkov-report.json)
-            echo "Checkov Summary:" > checkov-summary.md
-            echo "Passed checks: $passed" >> checkov-summary.md
-            echo "Failed checks: $failed" >> checkov-summary.md
-            echo "Skipped checks: $skipped" >> checkov-summary.md
-            echo "Parsing errors: $parsing_errors" >> checkov-summary.md
-          else
-            echo "Checkov report not found!" > checkov-summary.md
-          fi
-
-      # Step 8: Rate the severity of the vulnerabilities and prioritize them
-      - name: Rate the severity of the vulnerabilities and prioritize them
-        id: evaluate-vulnerabilities
+      - name: Ensure reports exist
         run: |
           if [ ! -f trivy-report.json ]; then
-            echo "trivy-report.json not found!"
+            echo "Error: trivy-report.json not found!"
             exit 1
           fi
-          echo "Rating and prioritizing vulnerabilities..."
-          node evaluate_risk.js trivy-report.json > risk_report.md
-
-      # Step 9: If there is no permanent fix, create a temporary fix
-      - name: Create a temporary fix
-        id: apply-workarounds
-        run: |
-          echo "Checking if risk_report.md exists..."
-          if [ ! -f risk_report.md ]; then
-            echo "risk_report.md not found!"
+          if [ ! -f checkov-report.json ]; then
+            echo "Error: checkov-report.json not found!"
             exit 1
           fi
-          echo "risk_report.md found. Proceeding with temporary fixes..."
-          echo "Creating temporary fixes..."
-          node implement_workarounds.js risk_report.md
-          echo "Temporary fixes applied successfully."
 
-      # Step 10: Generate a detailed report of the vulnerabilities and update GitHub issues
-      - name: Generate a detailed report of the vulnerabilities and update GitHub issues
-        id: generate-advisory
+      - name: Generate Security Advisory
         run: |
-          echo "Generating detailed report..." && \
-          node generate_advisory.js trivy-report.json checkov-report.json && \
-          echo "Detailed report generated:" && \
-          cat detailed_advisory.md && \
-          echo "Checkov Summary:" && \
-          cat checkov-summary.md && \
-          gh issue create --title "Security advisory: Critical vulnerabilities discovered" --body "$(cat detailed_advisory.md)\n\n$(cat checkov-summary.md)" --label "security"
+          node generate_advisory.js trivy-report.json checkov-report.json
+          if [ ! -f detailed_advisory.md ]; then
+            echo "Error: detailed_advisory.md not found!"
+            exit 1
+          fi
+          cat detailed_advisory.md
+
+      - name: Create GitHub Issue
+        run: |
+          gh issue create --title "Security advisory: Critical vulnerabilities found" \
+            --body "$(cat detailed_advisory.md)" --label "security"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Use the built-in GITHUB_TOKEN
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 11: Update documentation with risk assessment
-      - name: Update documentation with risk assessment
-        run: |
-          echo "Updating documentation..."
-          node update_documentation.js risk_report.md detailed_advisory.md checkov-summary.md
-
-    # Step 12: Save the report as an artifact
-      - name: Save the report as an artifact
+      - name: Upload reports
         uses: actions/upload-artifact@v4
         with:
-          name: security-risk-report-${{ github.run_id }}
+          name: security-reports
           path: |
             trivy-report.json
             checkov-report.json
-            trivy-tf-report.json
-            risk_report.md
             detailed_advisory.md
-            checkov-summary.md
-   
