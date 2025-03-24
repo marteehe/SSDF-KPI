@@ -8,14 +8,14 @@ function generateMarkdownReport(trivyReportPath, checkovReportPath) {
     trivyData = JSON.parse(fs.readFileSync(trivyReportPath, 'utf8'));
   } catch (error) {
     console.error(`Error reading Trivy report: ${error.message}`);
-    trivyData = { Results: [] };  // Fallback hvis Trivy-rapporten ikke kan leses
+    trivyData = { Results: [] };  // Fallback if Trivy report cannot be read
   }
 
   try {
     checkovData = JSON.parse(fs.readFileSync(checkovReportPath, 'utf8'));
   } catch (error) {
     console.error(`Error reading Checkov report: ${error.message}`);
-    checkovData = { results: [], summary: {} };  // Fallback hvis Checkov-rapporten ikke kan leses
+    checkovData = { results: [], summary: {} };  // Fallback if Checkov report cannot be read
   }
 
   let markdown = `# Security Advisory Report\n\n**Report generated at:** ${new Date().toISOString()}\n\n## Risk Summary\n\n`;
@@ -69,6 +69,10 @@ if (!trivyReportPath || !checkovReportPath) {
   console.error('Error: Missing required arguments.');
   process.exit(1);
 }
+
+console.log(`Reading Trivy report from: ${trivyReportPath}`);
+console.log(`Reading Checkov report from: ${checkovReportPath}`);
+console.log(`Output will be saved to: ${outputPath}`);
 
 const output = generateMarkdownReport(trivyReportPath, checkovReportPath);
 fs.writeFileSync(outputPath, output);  // Save as detailed_advisory.md
