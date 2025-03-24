@@ -1,0 +1,53 @@
+# This workflow is an extension of RV.2.1.yml and an attempt to run multiple jobs simultaneously to achieve vulnerability scanning using Snyk on all modules within a single workflow.
+# Further work involves testing this to ensure it functions as intended, as it has currently reached its limit for Snyk tests this month.
+name: RV.2.1 - MATRIX - Snyk
+on:
+  push:
+    #branches: [ "main" ]
+  pull_request:
+    # The branches below must be a subset of the branches above
+   # branches: [ "main" ]
+  schedule:
+    - cron: '16 21 * * 5'
+
+permissions:
+  contents: read
+
+jobs:
+  snyk:
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy: 
+      matrix: 
+        file: 
+          - ./modules/vm-linux/main.tf
+          - ./modules/vm-windows/main.tf
+          - ./modules/vnet-peering/main.tf
+          - ./modules/vnet/main.tf
+          - ./modules/azurefirewall/main.tf
+          - ./modules/azurefirewallpolicy/main.tf
+          - ./modules/azurefirewallrulecolgrp/main.tf
+          - ./modules/bastion/main.tf
+          - ./modules/publicip/main.tf
+          - ./modules/recoveryservicesvault/main.tf
+          - ./modules/resourcegroups/main.tf
+          - ./modules/routetables/main.tf
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Snyk to check configuration files for security issues
+        uses: snyk/actions/iac@14818c4695ecc4045f33c9cee9e795a788711ca4
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}  #  Pass på at tokenet blir brukt
+        with:
+           args: test ${{ matrix.file }} --sarif --json-file-output=snyk_${{ hashFiles(matrix.file) }}.sarif
+
+      - name: Upload result to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+           sarif_file: snyk_${{ hashFiles(matrix.file) }}.sarif
+
