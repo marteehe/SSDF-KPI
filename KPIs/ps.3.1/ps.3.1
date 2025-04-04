@@ -1,0 +1,84 @@
+name: ps.3.1-backup
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Create backup of repository
+      run: |
+        git clone --mirror https://github.com/advisense/iac-azure-terraform-example.git 
+        sudo apt-get install zip -y 
+        zip -r iac-azure-terraform-example.zip iac-azure-terraform-example.git 
+
+    - name: Generate sha checksum 
+      run: sha256sum iac-azure-terraform-example.zip > iac-azure-terraform-example.zip.sha256sum
+
+    - name: Upload backup as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: backup-zip
+        path: iac-azure-terraform-example.zip
+
+    - name: Upload checksum as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: backup-sha256
+        path: iac-azure-terraform-example.zip.sha256sum
+
+    - name: Checkout target repository
+      run: |
+        git clone https://github.com/marteehe/SSDF-KPI.git
+        cd SSDF-KPI
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+    - name: Copy backup file to repository folder
+      run: |
+        mkdir -p SSDF-KPI/KPIs/ps.3.1/
+        mv iac-azure-terraform-example.zip SSDF-KPI/KPIs/ps.3.1/
+        cd SSDF-KPI
+        git add KPIs/ps.3.1/iac-azure-terraform-example.zip
+        git commit -m "Legger til backup for ${{ github.event.release.tag_name }}"
+        git push origin main
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Get artifact download URLs
+      id: get-artifacts
+      run: |
+        ARTIFACTS_URL="https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts"
+        RESPONSE=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" $ARTIFACTS_URL)
+        BACKUP_URL=$(echo $RESPONSE | jq -r '.artifacts[] | select(.name=="backup-zip") | .archive_download_url')
+        SHA256_URL=$(echo $RESPONSE | jq -r '.artifacts[] | select(.name=="backup-sha256") | .archive_download_url')
+        echo "BACKUP_URL=$BACKUP_URL" >> $GITHUB_ENV
+        echo "SHA256_URL=$SHA256_URL" >> $GITHUB_ENV
+
+    - name: Create GitHub Issue with backup and checksum links
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        BACKUP_URL: ${{ env.BACKUP_URL }}
+        SHA256_URL: ${{ env.SHA256_URL }}
+      run: | 
+        ISSUE_TITLE="Backup of repository and checksum for ${{ github.event.release.tag_name }} on $(date)"
+        ISSUE_BODY=$(cat <<EOF
+        ## Backup of repository and checksum for ${{ github.event.release.tag_name }} on $(date)
+        ### Backup file
+        [Download backup-zip]($BACKUP_URL)
+        ### Checksum file
+        [Download backup-sha256]($SHA256_URL)
+        ### Details
+        - Repository: ${{ github.repository }}
+        - Release: ${{ github.event.release.tag_name }}
+        - Date: $(date)
+        EOF
+        )
+        gh issue create --title "$ISSUE_TITLE" --body "$ISSUE_BODY" --label "backup"
+
