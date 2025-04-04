@@ -1,0 +1,53 @@
+name: PW.7.1 
+
+on:
+  push:
+    branches-ignore:
+      - main      #Ignores main branch as this branch requires manual review.
+jobs:
+  test-and-validate:
+    runs-on: ubuntu-latest
+    name: Terraform Test and Validate
+    steps:
+      # Step 1: Checkout the repository code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.0.11
+
+      # Step 2: Initialize Terraform
+      - name: Terraform Init
+        id: terraform-init
+        run: terraform init -backend=false
+
+      # Step 3: Check Terraform formatting
+      - name: Terraform Format Check
+        id: terraform-fmt
+        run: terraform fmt -check -recursive
+
+      # Step 4: Validate Terraform configuration
+      - name: Terraform Validate
+        id: terraform-validate
+        run: terraform validate -json
+
+      # Step 5: Setup TFLint
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v3
+        with:
+          tflint_version: latest
+       
+
+      # Step 6: Runs TFLint
+      - name: TFLint run
+        run: tflint --format=json > tflint-report.json
+
+       
+
+      # Step 7: Run tfsec for security scanning
+      - name: Terraform Security Scan (tfsec)
+        id: terraform-tfsec
+        uses: aquasecurity/tfsec-action@v1.0.0
+      
