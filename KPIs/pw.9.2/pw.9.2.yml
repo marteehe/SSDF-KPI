@@ -1,0 +1,92 @@
+name: PW.9.2
+
+on: 
+  push:
+    branches:
+      - andreas-pw.9.2
+  workflow_dispatch:
+#Special permissions required for OIDC authentication
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+
+#These environment variables are used by the terraform azure provider to setup OIDD authenticate. 
+env:
+  ARM_CLIENT_ID: "${{ secrets.AZURE_CLIENT_ID }}"
+  ARM_SUBSCRIPTION_ID: "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+  ARM_TENANT_ID: "${{ secrets.AZURE_TENANT_ID }}"
+
+jobs:
+  terraform-plan:
+    name: 'Terraform Plan'
+    runs-on: ubuntu-latest
+    env:
+      #this is needed since we are running terraform with read-only permissions
+      ARM_SKIP_PROVIDER_REGISTRATION: true
+    outputs:
+      tfplanExitCode: ${{ steps.tf-plan.outputs.exitcode }}
+
+    steps:
+    # Log in to azure CLI
+    - name: Azure CLI Login
+      uses: azure/login@v2
+      with:
+        client-id: ${{ env.ARM_CLIENT_ID }}
+        tenant-id: ${{ env.ARM_TENANT_ID }}
+        subscription-id: ${{ env.ARM_SUBSCRIPTION_ID }}
+      continue-on-error: true
+    # Checkout the repository to the GitHub Actions runner
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    # Install the latest version of the Terraform CLI
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_wrapper: false
+
+    #Create tfvars file
+    - name: Create terraform.tfvars
+      run: | 
+        echo "admin_password=\"Cisco123!\"" >> terraform.tfvars
+ 
+    # Generates an execution plan for Terraform
+    # An exit code of 0 indicated no changes, 1 a terraform failure, 2 there are pending changes.
+    - name: Install OPA
+      run: |
+        wget https://openpolicyagent.org/downloads/latest/opa_linux_amd64 -O opa
+          chmod +x opa && sudo mv opa /usr/local/bin/
+          opa version
+    - name: Fetch git repo
+      run: |
+        git clone https://github.com/advisense/iac-azure-terraform-example.git
+        cd iac-azure-terraform-example
+        ls -la
+        
+    - name: Terraform Init
+      run: terraform init
+
+    - name: Terraform Plan
+      run: |
+        terraform plan -out=tfplan.binary
+        terraform show -json tfplan.binary > tfplan.json
+
+    - name: Write out json file
+      run: |
+        cat tfplan.json
+        ls -la
+ 
+    - name: Verify OPA Installation
+      run: |
+          if ! command -v opa &> /dev/null; then
+            echo "OPA is not installed or not found in PATH."
+            exit 1
+          else
+            echo "OPA is installed correctly."
+            opa version
+          fi
+
+    - name: Run OPA Policy Check
+      run: |
+          opa eval --data policies/ --input tfplan.json --format pretty "data.terraform.analysis.deny"
