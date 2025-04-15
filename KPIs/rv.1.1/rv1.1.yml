@@ -1,0 +1,48 @@
+name: RV.1.1
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # Schedule the workflow to run daily at midnight
+  push:                   # Trigger the workflow whenever there is a push to the repository
+  pull_request:           # Trigger the workflow whenever there is a pull request to the repository
+  workflow_dispatch:      # Allow manual triggering of the workflow
+
+permissions:
+  contents: read          # Grant read permissions for repository contents
+
+jobs:
+  terrascan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4            
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v1
+        with:
+          terraform_version: 1.11.3
+      # Install Terrascan 
+      - name: Run vulnerability scan
+        run: |
+          curl -L "$(curl -s https://api.github.com/repos/tenable/terrascan/releases/latest | grep -o -E "https://.+?_Linux_x86_64.tar.gz")" > terrascan.tar.gz
+          tar -xf terrascan.tar.gz terrascan && rm terrascan.tar.gz
+          install terrascan /usr/local/bin && rm terrascan
+
+      # Initialize and run terrascan to scan the specified directory for vulnerabilities
+      - name: Initialize Terrascan
+        run: terrascan init
+      - name: Run vulnerability scan
+        run: terrascan scan -d ./modules/ 
+
+  ggshield-scan:
+    name: GitGuardian scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      # Use GitGuardian's ggshield to scan for secrets in the repository
+      - name: GitGuardian scan
+        uses: GitGuardian/ggshield/actions/secret@v1.37.0
+        # Uses the token to authenticate with GitGuardian
+        env:
+          GITGUARDIAN_TOKEN: ${{ secrets.GITGUARDIAN_TOKEN }}
