@@ -3,7 +3,7 @@ name: PW.9.2
 on: 
   push:
     branches:
-      - andreas-pw.9.2
+      - main
   workflow_dispatch:
 #Special permissions required for OIDC authentication
 permissions:

@@ -8,8 +8,8 @@ on:
     branches:
       - main
   schedule:
-    - cron: '0 0 * * 1' # Kjør hver mandag kl 00:00
-  workflow_dispatch: # Tillater manuell kjøring
+    - cron: '0 0 * * 1'
+  workflow_dispatch:
 
 jobs:
   security-scan:
